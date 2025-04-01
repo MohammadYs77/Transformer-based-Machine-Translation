@@ -1,0 +1,124 @@
+import torch, loader
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, embed_size, num_heads):
+        super().__init__()
+        self.num_heads = num_heads
+        self.embed_size = embed_size
+
+        assert embed_size % num_heads == 0
+
+        self.depth = embed_size // num_heads
+
+        self.W_q = nn.Linear(embed_size, embed_size)
+        self.W_k = nn.Linear(embed_size, embed_size)
+        self.W_v = nn.Linear(embed_size, embed_size)
+        self.W_o = nn.Linear(embed_size, embed_size)
+
+    def forward(self, q, k, v, mask=None):
+        batch_size = q.shape[0]
+        # print(f'shape of q in class mha: {q.shape}')
+        q = self.W_q(q).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
+        # print(f'shape of q in class mha after reshaping: {q.shape}')
+        k = self.W_k(k).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
+        # print(f'shape of k in class mha: {k.shape}')
+        v = self.W_v(v).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
+
+        scores = torch.matmul(q, k.transpose(-2, -1)) / (self.depth ** 0.5)
+        # print(f'shape of scores in class mha: {scores.shape}')
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+
+        attention_weights = F.softmax(scores, dim=-1)
+        output = torch.matmul(attention_weights, v)
+
+        output = output.transpose(1, 2).contiguous().view(batch_size, -1, self.embed_size)
+        # print(f'shape of output in class mha: {output.shape}')
+        # print()
+        return self.W_o(output)
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self, embed_size, num_heads, ff_hidden_dim, dropout=0.1):
+        super().__init__()
+        self.attn = MultiHeadAttention(embed_size, num_heads)
+        self.norm1 = nn.LayerNorm(embed_size)
+        self.ff = nn.Sequential(
+            nn.Linear(embed_size, ff_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(ff_hidden_dim, embed_size),
+        )
+        self.norm2 = nn.LayerNorm(embed_size)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, mask=None):
+        attn_output = self.attn(x, x, x, mask)
+        x = self.norm1(x + self.dropout(attn_output))
+        ff_output = self.ff(x)
+        return self.norm2(x + self.dropout(ff_output))
+
+
+class Transformer(nn.Module):
+    def __init__(self, src_vocab_size, tgt_vocab_size, embed_size=512, num_heads=8, num_layers=4, ff_hidden_dim=2048, dropout=0.1):
+        super().__init__()
+        self.encoder_embedding = nn.Embedding(src_vocab_size, embed_size)
+        self.decoder_embedding = nn.Embedding(tgt_vocab_size, embed_size)
+
+        self.encoder_layers = nn.ModuleList([
+            TransformerBlock(embed_size, num_heads, ff_hidden_dim, dropout) for _ in range(num_layers)
+        ])
+        self.decoder_layers = nn.ModuleList([
+            TransformerBlock(embed_size, num_heads, ff_hidden_dim, dropout) for _ in range(num_layers)
+        ])
+        
+        self.fc_out = nn.Linear(embed_size, tgt_vocab_size)
+
+    def forward(self, src, tgt, src_mask=None, tgt_mask=None):
+        src = self.encoder_embedding(src)
+        for layer in self.encoder_layers:
+            src = layer(src, src_mask)
+
+        tgt = self.decoder_embedding(tgt)
+        for layer in self.decoder_layers:
+            tgt = layer(tgt, tgt_mask)
+
+        return self.fc_out(tgt)
+
+
+def test_model():
+    model = Transformer(32000, 32000, num_layers=6, embed_size=512, num_heads=8, ff_hidden_dim=2048, dropout=0.1).to('cuda')
+
+    sp, dataloader = loader.load_data(return_tokenizer=True)
+
+    # Test the dataloader
+    for src_batch, tgt_batch in dataloader:
+        src = src_batch.to('cuda')
+        tgt = tgt_batch.to('cuda')
+        # print("Source Batch:", src_batch.shape)
+        # print("Target Batch:", tgt_batch.shape)
+        # print()
+        # print(src_batch)
+        # print()
+        # print(tgt_batch)
+        break
+
+    test_batch = model(src, tgt)
+    # print(test_batch.shape)
+    
+    
+    # for each_sent in test_batch[0]:
+    #     print(sp.id_to_piece(torch.argmax(each_sent)))
+    #     break
+    token_ids = torch.argmax(test_batch, dim=-1).tolist()
+    # print(token_ids.shape)
+    # print(token_ids)
+    print()
+    # for tok in token_ids:
+    print(sp.decode(token_ids[0]))
+    
+    
+if __name__ == '__main__':
+    test_model()

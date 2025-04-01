@@ -31,15 +31,10 @@ class TranslationDataset(Dataset):
         return torch.tensor(src_tokens), torch.tensor(tgt_tokens)
 
 
-# Load the tokenizer
-# sp = spm.SentencePieceProcessor(model_file="spm_joint.model")
-
-
-def load_data():
+def load_data(return_tokenizer=False):
     
     sp = preprocess.load_tokenizer()
 
-    # Create the dataset and dataloader
     dataset = TranslationDataset("./training/europarl-v7.de-en.en", "./training/europarl-v7.de-en.de", tokenizer=sp)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
     
@@ -52,6 +47,8 @@ def load_data():
     #     print()
     #     print(tgt_batch)
     #     break
+    if return_tokenizer:
+        return sp, dataloader
     
     return dataloader
 

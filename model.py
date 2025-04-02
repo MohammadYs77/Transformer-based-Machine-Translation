@@ -1,7 +1,28 @@
-import torch, loader
+import torch, loader, math
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, embed_size, max_len=128):
+        super(PositionalEncoding, self).__init__()
+
+        # Create a matrix of shape (max_len, embed_size)
+        pe = torch.zeros(max_len, embed_size)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        
+        div_term = torch.exp(torch.arange(0, embed_size, 2).float() * (-math.log(10000.0) / embed_size))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        pe = pe.unsqueeze(0)  # Shape: (1, max_len, embed_size)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:, :x.shape[1], :]  # Add positional encoding
+        return x
+    
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, embed_size, num_heads):
@@ -20,24 +41,26 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, q, k, v, mask=None):
         batch_size = q.shape[0]
-        # print(f'shape of q in class mha: {q.shape}')
+        print(f'shape of q in class mha: {q.shape}')
         q = self.W_q(q).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
-        # print(f'shape of q in class mha after reshaping: {q.shape}')
+        print(f'shape of q in class mha after reshaping: {q.shape}')
         k = self.W_k(k).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
-        # print(f'shape of k in class mha: {k.shape}')
+        print(f'shape of k in class mha: {k.shape}')
         v = self.W_v(v).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / (self.depth ** 0.5)
-        # print(f'shape of scores in class mha: {scores.shape}')
+        print(f'shape of scores in class mha: {scores.shape}')
         if mask is not None:
             scores = scores.masked_fill(mask == 0, float('-inf'))
 
         attention_weights = F.softmax(scores, dim=-1)
+        print(f'shape of attention weights: {attention_weights.shape}')
+        print(f'shape of v: {v.shape}')
         output = torch.matmul(attention_weights, v)
-
+        print(f'shape of output in class mha: {output.shape}')
         output = output.transpose(1, 2).contiguous().view(batch_size, -1, self.embed_size)
-        # print(f'shape of output in class mha: {output.shape}')
-        # print()
+        print(f'shape of output in class mha: {output.shape}')
+        print()
         return self.W_o(output)
 
 
@@ -64,8 +87,12 @@ class TransformerBlock(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, src_vocab_size, tgt_vocab_size, embed_size=512, num_heads=8, num_layers=4, ff_hidden_dim=2048, dropout=0.1):
         super().__init__()
+        
         self.encoder_embedding = nn.Embedding(src_vocab_size, embed_size)
         self.decoder_embedding = nn.Embedding(tgt_vocab_size, embed_size)
+        
+        self.pos_encoding_input = PositionalEncoding(embed_size)
+        self.pos_encoding_target = PositionalEncoding(embed_size)
 
         self.encoder_layers = nn.ModuleList([
             TransformerBlock(embed_size, num_heads, ff_hidden_dim, dropout) for _ in range(num_layers)
@@ -78,10 +105,12 @@ class Transformer(nn.Module):
 
     def forward(self, src, tgt, src_mask=None, tgt_mask=None):
         src = self.encoder_embedding(src)
+        src = self.pos_encoding_input(src)
         for layer in self.encoder_layers:
             src = layer(src, src_mask)
 
         tgt = self.decoder_embedding(tgt)
+        tgt = self.pos_encoding_target(tgt)
         for layer in self.decoder_layers:
             tgt = layer(tgt, tgt_mask)
 

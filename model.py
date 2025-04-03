@@ -41,26 +41,26 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, q, k, v, mask=None):
         batch_size = q.shape[0]
-        print(f'shape of q in class mha: {q.shape}')
+        # print(f'shape of q in class mha: {q.shape}')
         q = self.W_q(q).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
-        print(f'shape of q in class mha after reshaping: {q.shape}')
+        # print(f'shape of q in class mha after reshaping: {q.shape}')
         k = self.W_k(k).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
-        print(f'shape of k in class mha: {k.shape}')
+        # print(f'shape of k in class mha: {k.shape}')
         v = self.W_v(v).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / (self.depth ** 0.5)
-        print(f'shape of scores in class mha: {scores.shape}')
+        # print(f'shape of scores in class mha: {scores.shape}')
         if mask is not None:
             scores = scores.masked_fill(mask == 0, float('-inf'))
 
         attention_weights = F.softmax(scores, dim=-1)
-        print(f'shape of attention weights: {attention_weights.shape}')
-        print(f'shape of v: {v.shape}')
+        # print(f'shape of attention weights: {attention_weights.shape}')
+        # print(f'shape of v: {v.shape}')
         output = torch.matmul(attention_weights, v)
-        print(f'shape of output in class mha: {output.shape}')
+        # print(f'shape of output in class mha: {output.shape}')
         output = output.transpose(1, 2).contiguous().view(batch_size, -1, self.embed_size)
-        print(f'shape of output in class mha: {output.shape}')
-        print()
+        # print(f'shape of output in class mha: {output.shape}')
+        # print()
         return self.W_o(output)
 
 
@@ -85,23 +85,23 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, src_vocab_size, tgt_vocab_size, embed_size=512, num_heads=8, num_layers=4, ff_hidden_dim=2048, dropout=0.1):
+    def __init__(self, vocab_size, embed_size=512, num_heads=8, num_layers=4, dff=2048, dropout=0.1):
         super().__init__()
         
-        self.encoder_embedding = nn.Embedding(src_vocab_size, embed_size)
-        self.decoder_embedding = nn.Embedding(tgt_vocab_size, embed_size)
+        self.encoder_embedding = nn.Embedding(vocab_size, embed_size)
+        self.decoder_embedding = nn.Embedding(vocab_size, embed_size)
         
         self.pos_encoding_input = PositionalEncoding(embed_size)
         self.pos_encoding_target = PositionalEncoding(embed_size)
 
         self.encoder_layers = nn.ModuleList([
-            TransformerBlock(embed_size, num_heads, ff_hidden_dim, dropout) for _ in range(num_layers)
+            TransformerBlock(embed_size, num_heads, dff, dropout) for _ in range(num_layers)
         ])
         self.decoder_layers = nn.ModuleList([
-            TransformerBlock(embed_size, num_heads, ff_hidden_dim, dropout) for _ in range(num_layers)
+            TransformerBlock(embed_size, num_heads, dff, dropout) for _ in range(num_layers)
         ])
         
-        self.fc_out = nn.Linear(embed_size, tgt_vocab_size)
+        self.fc_out = nn.Linear(embed_size, vocab_size)
 
     def forward(self, src, tgt, src_mask=None, tgt_mask=None):
         src = self.encoder_embedding(src)
@@ -118,9 +118,12 @@ class Transformer(nn.Module):
 
 
 def test_model():
-    model = Transformer(32000, 32000, num_layers=6, embed_size=512, num_heads=8, ff_hidden_dim=2048, dropout=0.1).to('cuda')
+    model = Transformer(32000, num_layers=6, embed_size=512, num_heads=8, dff=2048, dropout=0.1).to('cuda')
 
-    sp, dataloader = loader.load_data(return_tokenizer=True)
+    sp, dataloader = loader.load_data(src_path='./training/europarl-v7.de-en.en',
+                                    tgt_path='./training/europarl-v7.de-en.de',
+                                    batch=32,
+                                    return_tokenizer=True)
 
     # Test the dataloader
     for src_batch, tgt_batch in dataloader:

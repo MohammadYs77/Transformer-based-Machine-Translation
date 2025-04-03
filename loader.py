@@ -31,12 +31,13 @@ class TranslationDataset(Dataset):
         return torch.tensor(src_tokens), torch.tensor(tgt_tokens)
 
 
-def load_data(return_tokenizer=False):
+def load_data(src_path, tgt_path, batch, tokenizer=None, return_tokenizer=False):
     
-    sp = preprocess.load_tokenizer()
+    if tokenizer is None:
+        tokenizer = preprocess.load_tokenizer()
 
-    dataset = TranslationDataset("./training/europarl-v7.de-en.en", "./training/europarl-v7.de-en.de", tokenizer=sp)
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+    dataset = TranslationDataset(src_path, tgt_path, tokenizer=tokenizer)
+    dataloader = DataLoader(dataset, batch_size=batch, shuffle=True)
     
     # # Test the dataloader
     # for src_batch, tgt_batch in dataloader:
@@ -48,10 +49,12 @@ def load_data(return_tokenizer=False):
     #     print(tgt_batch)
     #     break
     if return_tokenizer:
-        return sp, dataloader
-    
-    return dataloader
+        return tokenizer, dataloader
+    else:
+        return dataloader
 
 
 if __name__ == "__main__":
-    load_data()
+    load_data(src_path='./training/europarl-v7.de-en.en',
+                        tgt_path='./training/europarl-v7.de-en.de',
+                        batch=32)

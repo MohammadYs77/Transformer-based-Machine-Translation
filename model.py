@@ -103,6 +103,46 @@ class Transformer(nn.Module):
         
         self.fc_out = nn.Linear(embed_size, vocab_size)
 
+    def generate(self, src, max_len=128, start_symbol=1):  # assuming <s> token has ID 1
+        """
+        src: (batch_size, src_seq_len)
+        returns: output logits (batch_size, max_len, vocab_size)
+        """
+        self.eval()
+        batch_size = src.size(0)
+        src_mask = self.make_src_mask(src)  # Implement if you haven't already
+
+        memory = self.encoder(src, src_mask)
+
+        # Start with <s> token for every sequence
+        ys = torch.ones(batch_size, 1).fill_(start_symbol).long().to(src.device)  # (batch, 1)
+
+        for i in range(max_len - 1):
+            tgt_mask = self.make_tgt_mask(ys)
+            out = self.decoder(ys, memory, tgt_mask, src_mask)
+            out = self.fc_out(out)  # (batch, seq_len, vocab_size)
+            next_token_logits = out[:, -1, :]  # (batch, vocab_size)
+
+            next_tokens = torch.argmax(next_token_logits, dim=-1).unsqueeze(1)  # (batch, 1)
+            ys = torch.cat([ys, next_tokens], dim=1)
+
+        return self.fc_out(ys)  # final logits (batch, max_len, vocab_size)
+
+    def make_src_mask(self, src):
+        # Mask padding tokens (assuming padding token ID = 0)
+        src_mask = (src != 0).unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, src_len)
+        return src_mask  # used in encoder and cross-attention
+
+    def make_tgt_mask(self, tgt):
+        tgt_len = tgt.size(1)
+        tgt_pad_mask = (tgt != 0).unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, tgt_len)
+
+        # Prevent attending to future tokens (causal mask)
+        causal_mask = torch.tril(torch.ones((tgt_len, tgt_len), device=tgt.device)).bool()
+        causal_mask = causal_mask.unsqueeze(0).unsqueeze(1)  # (1, 1, tgt_len, tgt_len)
+
+        return tgt_pad_mask & causal_mask
+
     def forward(self, src, tgt, src_mask=None, tgt_mask=None):
         src = self.encoder_embedding(src)
         src = self.pos_encoding_input(src)
@@ -139,16 +179,8 @@ def test_model():
 
     test_batch = model(src, tgt)
     # print(test_batch.shape)
-    
-    
-    # for each_sent in test_batch[0]:
-    #     print(sp.id_to_piece(torch.argmax(each_sent)))
-    #     break
     token_ids = torch.argmax(test_batch, dim=-1).tolist()
-    # print(token_ids.shape)
-    # print(token_ids)
     print()
-    # for tok in token_ids:
     print(sp.decode(token_ids[0]))
     
     

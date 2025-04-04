@@ -1,5 +1,6 @@
 import torch, preprocess
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import random_split
 
 
 class TranslationDataset(Dataset):
@@ -31,30 +32,29 @@ class TranslationDataset(Dataset):
         return torch.tensor(src_tokens), torch.tensor(tgt_tokens)
 
 
-def load_data(src_path, tgt_path, batch, tokenizer=None, return_tokenizer=False):
+def load_data(src_path, tgt_path, batch, test_size=.9, tokenizer=None, return_tokenizer=False):
     
     if tokenizer is None:
         tokenizer = preprocess.load_tokenizer()
 
     dataset = TranslationDataset(src_path, tgt_path, tokenizer=tokenizer)
-    dataloader = DataLoader(dataset, batch_size=batch, shuffle=True)
     
-    # # Test the dataloader
-    # for src_batch, tgt_batch in dataloader:
-    #     print("Source Batch:", src_batch.shape)
-    #     print("Target Batch:", tgt_batch.shape)
-    #     print()
-    #     print(src_batch)
-    #     print()
-    #     print(tgt_batch)
-    #     break
+    train_size = int(test_size * len(dataset))  # 90% training
+    val_size = len(dataset) - train_size  # 10% validation
+
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+    # Create DataLoaders
+    train_loader = DataLoader(train_dataset, batch_size=batch, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch, shuffle=True)
+
     if return_tokenizer:
-        return tokenizer, dataloader
+        return tokenizer, train_loader, val_loader
     else:
-        return dataloader
+        return train_loader, val_loader
 
 
 if __name__ == "__main__":
-    load_data(src_path='./training/europarl-v7.de-en.en',
-                        tgt_path='./training/europarl-v7.de-en.de',
-                        batch=32)
+    train_loader, val_loader = load_data(src_path='./training/europarl-v7.de-en.en',
+                                                                    tgt_path='./training/europarl-v7.de-en.de',
+                                                                    batch=32)

@@ -22,8 +22,8 @@ class TranslationDataset(Dataset):
         tgt_text = self.tgt_sentences[idx].strip()
 
         # Tokenize sentences
-        src_tokens = self.tokenizer.encode(src_text, out_type=int)
-        tgt_tokens = self.tokenizer.encode(tgt_text, out_type=int)
+        src_tokens = self.tokenizer.encode(src_text, out_type=int, add_bos=True, add_eos=True)
+        tgt_tokens = self.tokenizer.encode(tgt_text, out_type=int, add_bos=True, add_eos=True)
 
         # Add padding
         src_tokens = src_tokens[:self.max_length] + [0] * (self.max_length - len(src_tokens))
@@ -55,6 +55,23 @@ def load_data(src_path, tgt_path, batch, test_size=.9, tokenizer=None, return_to
 
 
 if __name__ == "__main__":
+    
+    import sentencepiece as spm
+    sp = spm.SentencePieceProcessor(model_file='spm_joint.model')
+    
     train_loader, val_loader = load_data(src_path='./training/europarl-v7.de-en.en',
                                                                     tgt_path='./training/europarl-v7.de-en.de',
                                                                     batch=32)
+    
+    for src_batch, tgt_batch in train_loader:
+        src = src_batch.to('cuda')
+        tgt = tgt_batch.to('cuda')
+        print("Source Batch:", src_batch.shape)
+        print("Target Batch:", tgt_batch.shape)
+        # print()
+        # print(src_batch)
+        print()
+        print(src_batch[0])
+        print()
+        print(sp.id_to_piece(src_batch[0].tolist()))
+        break

@@ -4,7 +4,8 @@ import torch.optim as optim
 from model import Transformer  # Your Transformer model
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from nltk.tokenize import word_tokenize
-nltk.download('punkt')
+# nltk.download('punkt')
+# nltk.download('punkt_tab')
 
 # === CONFIGURATION ===
 BATCH_SIZE = 64
@@ -46,9 +47,10 @@ def calculate_bleu_nltk(model, dataloader, tokenizer):
     with torch.no_grad():
         for src_tokens, tgt_tokens in dataloader:
             src_tokens = src_tokens.to(DEVICE)
-
+            tgt_tokens = tgt_tokens.to(DEVICE)
+            
             # Generate translations
-            output = model.generate(src_tokens)  # (batch, seq_len, vocab)
+            output = model(src_tokens, tgt_tokens)  # (batch, seq_len, vocab)
             output_ids = torch.argmax(output, dim=-1)  # (batch, seq_len)
 
             for i in range(output_ids.size(0)):
@@ -95,44 +97,44 @@ def validate(model, dataloader):
 
 # === TRAINING LOOP ===
 def train():
-    print('In train')
+    # print('In train')
     model.train()
     total_loss = 0
 
     for epoch in range(EPOCHS):
         print(f'epoch: {epoch}')
         for batch_idx, (src_tokens, tgt_tokens) in enumerate(tr_loader):
-            print(f'batch_idx: {batch_idx}')
+            # print(f'batch_idx: {batch_idx}')
             src_tokens, tgt_tokens = src_tokens.to(DEVICE), tgt_tokens.to(DEVICE)
 
             # Shift target sequence for decoder input (teacher forcing)
             tgt_input = tgt_tokens[:, :-1]  # Remove <EOS>
             tgt_output = tgt_tokens[:, 1:]  # Remove <SOS>
-            print(f'got data')
+            # print(f'got data')
             optimizer.zero_grad()
 
             # Forward pass
             output = model(src_tokens, tgt_input)  # Shape: (batch, seq_len, vocab_size)
-            print(f'outputted model')
+            # print(f'outputted model')
             # Compute loss
             loss = criterion(output.reshape(-1, output.shape[-1]), tgt_output.reshape(-1))
             loss.backward()
-            print(f'computed loss')
+            # print(f'computed loss')
             # Gradient clipping to prevent exploding gradients
             torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
-            print(f'done clipping gradients')
+            # print(f'done clipping gradients')
             # Optimizer step
             optimizer.step()
             scheduler.step()
-            print(f'updated weights')
-            print()
+            # print(f'updated weights')
+            # print()
             total_loss += loss.item()
-            val_loss = validate(model, val_loader)
-            print(f"📉 Validation Loss: {val_loss:.4f}")
+            # val_loss = validate(model, val_loader)
+            # print(f"📉 Validation Loss: {val_loss:.4f}")
 
             # Calculate BLEU score
             bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)
-            print(f"🌍 BLEU Score: {bleu:.4f}")
+            print(f"🌍 BLEU Score at Batch {batch_idx+1}: {bleu:.8f}")
 
             # Logging
             if (batch_idx + 1) % LOG_INTERVAL == 0:
@@ -141,8 +143,8 @@ def train():
                 total_loss = 0
 
         # Calculate validation loss
-        val_loss = validate(model, val_loader)
-        print(f"📉 Validation Loss: {val_loss:.4f}")
+        # val_loss = validate(model, val_loader)
+        # print(f"📉 Validation Loss: {val_loss:.4f}")
 
         # Calculate BLEU score
         bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)

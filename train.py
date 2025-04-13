@@ -1,4 +1,4 @@
-import torch, nltk, preprocess, loader
+import torch, plotter, preprocess, loader
 import torch.nn as nn
 import torch.optim as optim
 from model import Transformer  # Your Transformer model
@@ -8,9 +8,10 @@ from nltk.tokenize import word_tokenize
 # nltk.download('punkt_tab')
 
 # === CONFIGURATION ===
-BATCH_SIZE = 64
-EPOCHS = 2
-LEARNING_RATE = 5e-4
+GENERATOR = torch.Generator().manual_seed(42)
+BATCH_SIZE = 16
+EPOCHS = 3
+LEARNING_RATE = 7e-4
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL_SAVE_PATH = "transformer_model.pth"
 SRC_PATH = './training/europarl-v7.de-en.en'
@@ -22,11 +23,11 @@ GRAD_CLIP = 1.0  # Clip gradients to prevent exploding gradients
 sp = preprocess.load_tokenizer()
 
 # Load dataset
-tr_loader, val_loader = loader.load_data(SRC_PATH, TGT_PATH, BATCH_SIZE)
+tr_loader, val_loader = loader.load_data(SRC_PATH, TGT_PATH, BATCH_SIZE, generator=GENERATOR)
 
 # Define model
 model = Transformer(
-    num_layers=3, embed_size=512, num_heads=4,
+    num_layers=6, embed_size=512, num_heads=8,
     dff=2048, vocab_size=32000, dropout=0.1).to(DEVICE)
 
 # Define loss and optimizer
@@ -100,11 +101,15 @@ def train():
     # print('In train')
     model.train()
     total_loss = 0
-
+    loss_hist = []
+    val_loss_hist = []
+    bleu_hist = []
+    
     for epoch in range(EPOCHS):
-        print(f'epoch: {epoch}')
+        print(f'Epoch: {epoch}')
+        print('-' * 10)
         for batch_idx, (src_tokens, tgt_tokens) in enumerate(tr_loader):
-            # print(f'batch_idx: {batch_idx}')
+            # print(f'batch_idx: {batch_idx}/{len(tr_loader)}')
             src_tokens, tgt_tokens = src_tokens.to(DEVICE), tgt_tokens.to(DEVICE)
 
             # Shift target sequence for decoder input (teacher forcing)
@@ -129,31 +134,34 @@ def train():
             # print(f'updated weights')
             # print()
             total_loss += loss.item()
-            # val_loss = validate(model, val_loader)
-            # print(f"📉 Validation Loss: {val_loss:.4f}")
-
-            # Calculate BLEU score
-            bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)
-            print(f"🌍 BLEU Score at Batch {batch_idx+1}: {bleu:.8f}")
 
             # Logging
             if (batch_idx + 1) % LOG_INTERVAL == 0:
                 avg_loss = total_loss / LOG_INTERVAL
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Step [{batch_idx+1}/{len(tr_loader)}], Loss: {avg_loss:.4f}")
+                loss_hist.append(avg_loss)
+                val_loss_hist.append(validate(model, val_loader))
+                bleu_hist.append(calculate_bleu_nltk(model, val_loader, tokenizer=sp))
                 total_loss = 0
 
         # Calculate validation loss
-        # val_loss = validate(model, val_loader)
-        # print(f"📉 Validation Loss: {val_loss:.4f}")
+        val_loss = validate(model, val_loader)
+        print(f"📉 Validation Loss: {val_loss:.4f}")
 
         # Calculate BLEU score
         bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)
-        print(f"🌍 BLEU Score: {bleu:.4f}")
+        print(f"🌍 BLEU Score: {bleu * 100:.4f}")
         
         # Save model checkpoint after each epoch
         torch.save(model.state_dict(), MODEL_SAVE_PATH)
         print(f"✅ Model saved after epoch {epoch+1}")
+        print('-' * 20 + '\n')
+    
+    history = {'loss': loss_hist, 'val_loss': val_loss_hist, 'bleu': bleu_hist}
+    return history
 
 # Run training
 if __name__ == '__main__':
-    train()
+    history = train()
+    # Plot training history
+    plotter.plot_loss_bleu(history, figsize=(12, 6))

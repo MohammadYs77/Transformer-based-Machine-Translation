@@ -1,6 +1,6 @@
 import torch, preprocess
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.data import random_split
+from torch.utils.data import random_split, Subset
 
 
 class TranslationDataset(Dataset):
@@ -32,17 +32,21 @@ class TranslationDataset(Dataset):
         return torch.tensor(src_tokens), torch.tensor(tgt_tokens)
 
 
-def load_data(src_path, tgt_path, batch, test_size=.9, tokenizer=None, return_tokenizer=False):
+def load_data(src_path, tgt_path, batch, generator, subset_size=.3, test_size=.9, tokenizer=None, return_tokenizer=False):
     
     if tokenizer is None:
         tokenizer = preprocess.load_tokenizer()
 
     dataset = TranslationDataset(src_path, tgt_path, tokenizer=tokenizer)
     
-    train_size = int(test_size * len(dataset))  # 90% training
-    val_size = len(dataset) - train_size  # 10% validation
+    subset_size = int(0.1 * len(dataset))
+    indices = torch.randperm(len(dataset))[:subset_size]
+    subset_dataset = Subset(dataset, indices)
+    
+    train_size = int(test_size * len(subset_dataset))  # 90% training
+    val_size = len(subset_dataset) - train_size  # 10% validation
 
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    train_dataset, val_dataset = random_split(subset_dataset, [train_size, val_size], generator=generator)
 
     # Create DataLoaders
     train_loader = DataLoader(train_dataset, batch_size=batch, shuffle=True)

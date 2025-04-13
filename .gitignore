@@ -1,3 +1,4 @@
 training/
 *.pdf
 *.txt
+*.pth

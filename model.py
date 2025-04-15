@@ -1,7 +1,6 @@
-import torch, loader, math
+import torch, math
 import torch.nn as nn
 import torch.nn.functional as F
-from nltk.translate.bleu_score import sentence_bleu
 
 
 class PositionalEncoding(nn.Module):
@@ -42,30 +41,22 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, q, k, v, mask=None):
         batch_size = q.shape[0]
-        # print(f'shape of q in class mha: {q.shape}')
         q = self.W_q(q).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
-        # print(f'shape of q in class mha after reshaping: {q.shape}')
         k = self.W_k(k).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
-        # print(f'shape of k in class mha: {k.shape}')
         v = self.W_v(v).view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / (self.depth ** 0.5)
-        # print(f'shape of scores in class mha: {scores.shape}')
+        
         if mask is not None:
             scores = scores.masked_fill(mask == 0, float('-inf'))
 
         attention_weights = F.softmax(scores, dim=-1)
-        # print(f'shape of attention weights: {attention_weights.shape}')
-        # print(f'shape of v: {v.shape}')
         output = torch.matmul(attention_weights, v)
-        # print(f'shape of output in class mha: {output.shape}')
         output = output.transpose(1, 2).contiguous().view(batch_size, -1, self.embed_size)
-        # print(f'shape of output in class mha: {output.shape}')
-        # print()
         return self.W_o(output)
 
 
-class TransformerBlock(nn.Module):
+class Encoder(nn.Module):
     def __init__(self, embed_size, num_heads, ff_hidden_dim, dropout=0.1):
         super().__init__()
         self.attn = MultiHeadAttention(embed_size, num_heads)
@@ -85,6 +76,35 @@ class TransformerBlock(nn.Module):
         return self.norm2(x + self.dropout(ff_output))
 
 
+class Decoder(nn.Module):
+    def __init__(self, embed_size, num_heads, ff_hidden_dim, dropout=0.1):
+        super().__init__()
+        self.self_attn = MultiHeadAttention(embed_size, num_heads)
+        self.norm1 = nn.LayerNorm(embed_size)
+
+        self.cross_attn = MultiHeadAttention(embed_size, num_heads)
+        self.norm2 = nn.LayerNorm(embed_size)
+
+        self.ff = nn.Sequential(
+            nn.Linear(embed_size, ff_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(ff_hidden_dim, embed_size)
+        )
+        self.norm3 = nn.LayerNorm(embed_size)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, enc_out, tgt_mask=None, src_mask=None):
+        attn1 = self.self_attn(x, x, x, tgt_mask)
+        x = self.norm1(x + self.dropout(attn1))
+        
+        attn2 = self.cross_attn(x, enc_out, enc_out, src_mask)
+        x = self.norm2(x + self.dropout(attn2))
+
+        # Feed-forward
+        ff_out = self.ff(x)
+        return self.norm3(x + self.dropout(ff_out))
+
+
 class Transformer(nn.Module):
     def __init__(self, vocab_size, embed_size=512, num_heads=8, num_layers=4, dff=2048, dropout=0.1):
         super().__init__()
@@ -96,10 +116,10 @@ class Transformer(nn.Module):
         self.pos_encoding_target = PositionalEncoding(embed_size)
 
         self.encoder_layers = nn.ModuleList([
-            TransformerBlock(embed_size, num_heads, dff, dropout) for _ in range(num_layers)
+            Encoder(embed_size, num_heads, dff, dropout) for _ in range(num_layers)
         ])
         self.decoder_layers = nn.ModuleList([
-            TransformerBlock(embed_size, num_heads, dff, dropout) for _ in range(num_layers)
+            Decoder(embed_size, num_heads, dff, dropout) for _ in range(num_layers)
         ])
         
         self.fc_out = nn.Linear(embed_size, vocab_size)
@@ -113,57 +133,48 @@ class Transformer(nn.Module):
         tgt = self.decoder_embedding(tgt)
         tgt = self.pos_encoding_target(tgt)
         for layer in self.decoder_layers:
-            tgt = layer(tgt, tgt_mask)
+            tgt = layer(tgt, src, tgt_mask)
 
         return self.fc_out(tgt)
 
 
-def test_model():
-    model = Transformer(32000, num_layers=6, embed_size=512, num_heads=8, dff=2048, dropout=0.1).to('cuda')
+def test_model(model, src, tokenizer, device):
 
-    sp, tr_loader, _ = loader.load_data(src_path='./training/europarl-v7.de-en.en',
-                                    tgt_path='./training/europarl-v7.de-en.de',
-                                    batch=32,
-                                    return_tokenizer=True)
-
-    # Test the dataloader
-    for src_batch, tgt_batch in tr_loader:
-        src = src_batch.to('cuda')
-        tgt = tgt_batch.to('cuda')
-        # print("Source Batch:", src_batch.shape)
-        # print("Target Batch:", tgt_batch.shape)
-        # print()
-        # print(src_batch)
-        # print()
-        # print(tgt_batch)
-        break
-    
-    print()
-    test_batch = model(src, tgt)
-    # print(f'Model\'s output\'s shape: {test_batch.shape}')
-    token_ids = torch.argmax(test_batch, dim=-1).tolist()
-    # print(f'id\'s shape: {len(token_ids)}')
-    # print(tgt[0])
-    # print()
-    tmp = tgt[0].detach().tolist()
-    print(tmp)
-    print()
-    tmp = [each for each in tmp if each != 0]
-    print(tmp)
-    print()
-    print(sp.id_to_piece(tmp))
-    print()
-    tmp = sp.decode(tmp).split()
-    print(tmp)    
-    print()    
-    token_ids = [sp.decode(each).split() for each in token_ids]
-    # tmp = sp.decode(token_ids[0]).split(' ')
-    # print(tmp)
-    print(token_ids[0])
-    print()
-    print(sentence_bleu([tmp], token_ids[0]))
+    tokenized_sents = [tokenizer.encode(each, out_type=int, add_bos=True, add_eos=True) for each in src]
+    tokenized_sents = [each + [0] * (128 - len(each)) for each in tokenized_sents]
+    tokenized_sents = [torch.tensor(each) for each in tokenized_sents]
+    tokenized_sents = torch.stack(tokenized_sents).to(device)
+    # print(f'shape of tokenized_sents: {tokenized_sents[0]}')
+    output = model(tokenized_sents, tokenized_sents)  # (batch, seq_len, vocab)
+    print(f'shape of output: {output.shape}')
+    output = torch.argmax(output, dim=-1)  # (batch, seq_len)
+    print(f'shape of output after argmax: {output.shape}')
+    for i in range(output.size(0)):
+        pred_ids = output[i].tolist()
+        pred_sentence = tokenizer.decode(pred_ids)
+        print(f'Predicted Sentence: {pred_sentence}')
+        # break  # Remove this to see all sentences
 
 
 
 if __name__ == '__main__':
-    test_model()
+
+    import sentencepiece as spm
+    tokenizer = spm.SentencePieceProcessor(model_file='spm_joint.model')
+    
+    PATH = './transformer_model.pth'
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Load model
+    model = Transformer(vocab_size=32000,
+                        embed_size=512,
+                        num_heads=8,
+                        num_layers=6,
+                        dff=2048,
+                        dropout=0.1).to('cuda')
+    model.load_state_dict(torch.load(PATH, weights_only=True))
+    model.eval()
+    
+    src = ['This is a test!.', 'I am trying to write a translator.', 'I like them big!']
+    
+    test_model(model, src, tokenizer, DEVICE)

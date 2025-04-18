@@ -2,7 +2,7 @@ import torch, plotter, preprocess, loader
 import torch.nn as nn
 import torch.optim as optim
 from model import Transformer  # Your Transformer model
-from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
 from nltk.tokenize import word_tokenize
 # nltk.download('punkt')
 # nltk.download('punkt_tab')
@@ -16,14 +16,19 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL_SAVE_PATH = "transformer_model.pth"
 SRC_PATH = './training/europarl-v7.de-en.en'
 TGT_PATH = './training/europarl-v7.de-en.de'
-LOG_INTERVAL = 100  # Print loss every X steps
-GRAD_CLIP = 1.0  # Clip gradients to prevent exploding gradients
+LOG_INTERVAL = 100  
+GRAD_CLIP = 1.0
+SUBSET_SIZE = 0.1
 
 # Load SentencePiece tokenizer
 sp = preprocess.load_tokenizer()
 
 # Load dataset
-tr_loader, val_loader = loader.load_data(SRC_PATH, TGT_PATH, BATCH_SIZE, generator=GENERATOR)
+tr_loader, val_loader = loader.load_data(SRC_PATH,
+                                                                    TGT_PATH,
+                                                                    BATCH_SIZE,
+                                                                    generator=GENERATOR,
+                                                                    subset_size=SUBSET_SIZE)
 
 # Define model
 model = Transformer(
@@ -39,40 +44,39 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
     optimizer, lambda step: min((step+1) ** -0.5, (step+1) * (4000 ** -1.5)))
 
 
+def truncate_at_eos(token_ids, eos_id):
+    return token_ids[:token_ids.index(eos_id)] if eos_id in token_ids else token_ids
+
 def calculate_bleu_nltk(model, dataloader, tokenizer):
     model.eval()
     smoothie = SmoothingFunction().method4
-    total_score = 0
-    count = 0
+    all_refs = []
+    all_hyps = []
+
+    eos_id = tokenizer.piece_to_id("</s>")
 
     with torch.no_grad():
         for src_tokens, tgt_tokens in dataloader:
             src_tokens = src_tokens.to(DEVICE)
             tgt_tokens = tgt_tokens.to(DEVICE)
-            
-            # Generate translations
-            output = model(src_tokens, tgt_tokens)  # (batch, seq_len, vocab)
-            output_ids = torch.argmax(output, dim=-1)  # (batch, seq_len)
+
+            output = model(src_tokens, tgt_tokens)
+            output_ids = torch.argmax(output, dim=-1)
 
             for i in range(output_ids.size(0)):
-                pred_ids = output_ids[i].tolist()
-                tgt_ids = tgt_tokens[i].tolist()
+                pred_ids = truncate_at_eos(output_ids[i].tolist(), eos_id)
+                tgt_ids = truncate_at_eos(tgt_tokens[i].tolist(), eos_id)
 
-                # Decode to strings
-                pred_sentence = tokenizer.decode(pred_ids)
-                ref_sentence = tokenizer.decode(tgt_ids)
+                pred_sentence = tokenizer.decode(pred_ids).replace("▁", " ").strip()
+                ref_sentence = tokenizer.decode(tgt_ids).replace("▁", " ").strip()
 
-                # Tokenize
                 pred_tokens = word_tokenize(pred_sentence.lower())
                 ref_tokens = word_tokenize(ref_sentence.lower())
 
-                # BLEU expects list of references
-                score = sentence_bleu([ref_tokens], pred_tokens, smoothing_function=smoothie)
-                total_score += score
-                count += 1
-            break
+                all_refs.append([ref_tokens])
+                all_hyps.append(pred_tokens)
 
-    return total_score / count
+    return corpus_bleu(all_refs, all_hyps, smoothing_function=smoothie)
 
 
 # === FUNCTION: Evaluate Validation Loss ===
@@ -101,6 +105,7 @@ def train():
     # print('In train')
     model.train()
     total_loss = 0
+    max_bleu = 0
     loss_hist = []
     val_loss_hist = []
     bleu_hist = []
@@ -139,10 +144,15 @@ def train():
             if (batch_idx + 1) % LOG_INTERVAL == 0:
                 avg_loss = total_loss / LOG_INTERVAL
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Step [{batch_idx+1}/{len(tr_loader)}], Loss: {avg_loss:.4f}")
+                tmp_bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)
+                if tmp_bleu > max_bleu:
+                    max_bleu = tmp_bleu
+                    torch.save(model.state_dict(), MODEL_SAVE_PATH)
                 loss_hist.append(avg_loss)
                 val_loss_hist.append(validate(model, val_loader))
-                bleu_hist.append(calculate_bleu_nltk(model, val_loader, tokenizer=sp))
+                bleu_hist.append(tmp_bleu)
                 total_loss = 0
+                model.train()
 
         # Calculate validation loss
         val_loss = validate(model, val_loader)
@@ -151,10 +161,10 @@ def train():
         # Calculate BLEU score
         bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)
         print(f"🌍 BLEU Score: {bleu * 100:.4f}")
-        
+        model.train()
         # Save model checkpoint after each epoch
-        torch.save(model.state_dict(), MODEL_SAVE_PATH)
-        print(f"✅ Model saved after epoch {epoch+1}")
+        # torch.save(model.state_dict(), MODEL_SAVE_PATH)
+        # print(f"✅ Model saved after epoch {epoch+1}")
         print('-' * 20 + '\n')
     
     history = {'loss': loss_hist, 'val_loss': val_loss_hist, 'bleu': bleu_hist}
@@ -165,3 +175,8 @@ if __name__ == '__main__':
     history = train()
     # Plot training history
     plotter.plot_loss_bleu(history, figsize=(12, 6))
+    # PATH = './transformer_model2.pth'
+    # model.load_state_dict(torch.load(PATH, weights_only=True))
+    # model.eval()
+    # bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)
+    # print(f"🌍 BLEU Score: {bleu * 100:.4f}")

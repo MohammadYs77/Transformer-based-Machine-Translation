@@ -32,21 +32,38 @@ class TranslationDataset(Dataset):
         return torch.tensor(src_tokens), torch.tensor(tgt_tokens)
 
 
-def load_data(src_path, tgt_path, batch, generator, subset_size=.3, test_size=.9, tokenizer=None, return_tokenizer=False):
+def load_data(src_path,
+                        tgt_path,
+                        batch,
+                        max_length=128,
+                        generator=None,
+                        subset_size=.1,
+                        test_size=.9,
+                        tokenizer=None,
+                        return_tokenizer=False):
     
     if tokenizer is None:
         tokenizer = preprocess.load_tokenizer()
 
-    dataset = TranslationDataset(src_path, tgt_path, tokenizer=tokenizer)
+    if generator is None:
+        generator = torch.Generator()
+        generator.manual_seed(42)
+
+    dataset = TranslationDataset(src_path,
+                                                        tgt_path,
+                                                        tokenizer=tokenizer,
+                                                        max_length=max_length)
     
-    subset_size = int(0.1 * len(dataset))
+    subset_size = int(subset_size * len(dataset))
     indices = torch.randperm(len(dataset))[:subset_size]
     subset_dataset = Subset(dataset, indices)
     
     train_size = int(test_size * len(subset_dataset))  # 90% training
     val_size = len(subset_dataset) - train_size  # 10% validation
 
-    train_dataset, val_dataset = random_split(subset_dataset, [train_size, val_size], generator=generator)
+    train_dataset, val_dataset = random_split(subset_dataset,
+                                                                            [train_size, val_size],
+                                                                            generator=generator)
 
     # Create DataLoaders
     train_loader = DataLoader(train_dataset, batch_size=batch, shuffle=True)

@@ -1,16 +1,16 @@
 import os
 import sentencepiece as spm
+import argparse
 
-
-def build_tokenizer(corpora):
+def build_tokenizer(corpora, model_prefix='spm_joint', vocab_size=32000):
     pwd = os.path.dirname(__file__)
     pwd = pwd.replace('\\', '/') + '/'
     filepath = pwd + corpora
 
     # Train a SentencePiece model
     spm.SentencePieceTrainer.train(input=filepath,
-                                                            model_prefix='spm_joint',
-                                                            vocab_size=32000,
+                                                            model_prefix=model_prefix,
+                                                            vocab_size=vocab_size,
                                                             pad_id=0, pad_piece='<pad>',
                                                             unk_id=3, unk_piece='<unk>')
 
@@ -32,4 +32,13 @@ def load_tokenizer():
 
 
 if __name__ == '__main__':
-    build_tokenizer('wmt14_combined.txt')
+    # build_tokenizer('wmt14_combined.txt')
+    parse = argparse.ArgumentParser()
+
+    parse.add_argument('-v', '--vocab_size', dest='vocab', type=int, default=32000)
+    parse.add_argument('-s', '--src',dest='src', type=str, default='wmt_combined.txt')
+    parse.add_argument('-p', '--model_prefix',dest='pfx', type=str, default='sp')
+    
+    args = vars(parse.parse_args())
+    
+    build_tokenizer(args['src'], args['pfx'], args['vocab'])

@@ -162,7 +162,7 @@ if __name__ == '__main__':
     import sentencepiece as spm
     tokenizer = spm.SentencePieceProcessor(model_file='spm_joint.model')
     
-    PATH = './transformer_model.pth'
+    PATH = './transformer_model2.pth'
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Load model

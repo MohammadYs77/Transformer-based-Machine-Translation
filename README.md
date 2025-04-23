@@ -69,11 +69,15 @@ The data pipeline is implemented in `loader.py`. The `load_data` function includ
 
 ### 4. Model Training
 
-Once the data pipeline and model are configured, initiate training with:
+Once the data pipeline and model are configured, initiate training with the arguments below (the values below are default values, and some of the other hyper-parameters can be set directly in the code):
 
 ```bash
-python main.py --epochs 10 --batch 16 --resize 224 --device 0
+python train.py --epochs 3 --batch 16 --learning_rate 0.0007
 ```
+
+### 5. Results
+
+After training the model, it achieved a BLEU score of 46.0394 imported from NLTK library.
 
 ## Acknowledgements
 

@@ -1,4 +1,4 @@
-import torch, plotter, preprocess, loader
+import torch, plotter, preprocess, loader, argparse
 import torch.nn as nn
 import torch.optim as optim
 from model import Transformer  # Your Transformer model
@@ -6,42 +6,6 @@ from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
 from nltk.tokenize import word_tokenize
 # nltk.download('punkt')
 # nltk.download('punkt_tab')
-
-# === CONFIGURATION ===
-GENERATOR = torch.Generator().manual_seed(42)
-BATCH_SIZE = 16
-EPOCHS = 3
-LEARNING_RATE = 7e-4
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MODEL_SAVE_PATH = "transformer_model.pth"
-SRC_PATH = './training/europarl-v7.de-en.en'
-TGT_PATH = './training/europarl-v7.de-en.de'
-LOG_INTERVAL = 100  
-GRAD_CLIP = 1.0
-SUBSET_SIZE = 0.1
-
-# Load SentencePiece tokenizer
-sp = preprocess.load_tokenizer()
-
-# Load dataset
-tr_loader, val_loader = loader.load_data(SRC_PATH,
-                                                                    TGT_PATH,
-                                                                    BATCH_SIZE,
-                                                                    generator=GENERATOR,
-                                                                    subset_size=SUBSET_SIZE)
-
-# Define model
-model = Transformer(
-    num_layers=6, embed_size=512, num_heads=8,
-    dff=2048, vocab_size=32000, dropout=0.1).to(DEVICE)
-
-# Define loss and optimizer
-criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore padding token
-optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.98), eps=1e-9)
-
-# Learning rate scheduler (Inverse Square Root Decay)
-scheduler = torch.optim.lr_scheduler.LambdaLR(
-    optimizer, lambda step: min((step+1) ** -0.5, (step+1) * (4000 ** -1.5)))
 
 
 def truncate_at_eos(token_ids, eos_id):
@@ -101,7 +65,7 @@ def validate(model, dataloader):
 
 
 # === TRAINING LOOP ===
-def train():
+def train(model, criterion, optimizer, scheduler, dataloader):
     # print('In train')
     model.train()
     total_loss = 0
@@ -113,7 +77,7 @@ def train():
     for epoch in range(EPOCHS):
         print(f'Epoch: {epoch}')
         print('-' * 10)
-        for batch_idx, (src_tokens, tgt_tokens) in enumerate(tr_loader):
+        for batch_idx, (src_tokens, tgt_tokens) in enumerate(dataloader['train']):
             # print(f'batch_idx: {batch_idx}/{len(tr_loader)}')
             src_tokens, tgt_tokens = src_tokens.to(DEVICE), tgt_tokens.to(DEVICE)
 
@@ -144,22 +108,22 @@ def train():
             if (batch_idx + 1) % LOG_INTERVAL == 0:
                 avg_loss = total_loss / LOG_INTERVAL
                 print(f"Epoch [{epoch+1}/{EPOCHS}], Step [{batch_idx+1}/{len(tr_loader)}], Loss: {avg_loss:.4f}")
-                tmp_bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)
+                tmp_bleu = calculate_bleu_nltk(model, dataloader['validation'], tokenizer=sp)
                 if tmp_bleu > max_bleu:
                     max_bleu = tmp_bleu
                     torch.save(model.state_dict(), MODEL_SAVE_PATH)
                 loss_hist.append(avg_loss)
-                val_loss_hist.append(validate(model, val_loader))
+                val_loss_hist.append(validate(model, dataloader['validation']))
                 bleu_hist.append(tmp_bleu)
                 total_loss = 0
                 model.train()
 
         # Calculate validation loss
-        val_loss = validate(model, val_loader)
+        val_loss = validate(model, dataloader['validation'])
         print(f"📉 Validation Loss: {val_loss:.4f}")
 
         # Calculate BLEU score
-        bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)
+        bleu = calculate_bleu_nltk(model, dataloader['validation'], tokenizer=sp)
         print(f"🌍 BLEU Score: {bleu * 100:.4f}")
         model.train()
         # Save model checkpoint after each epoch
@@ -170,13 +134,56 @@ def train():
     history = {'loss': loss_hist, 'val_loss': val_loss_hist, 'bleu': bleu_hist}
     return history
 
+
+
 # Run training
 if __name__ == '__main__':
-    history = train()
-    # Plot training history
+    
+    parse = argparse.ArgumentParser()
+
+    parse.add_argument('-e', '--epoch', dest='epoch', type=int, default=3)
+    parse.add_argument('-b', '--batch',dest='batch', type=int, default=16)
+    parse.add_argument('-lr', '--learning_rate',dest='lr', type=int, default=7e-4)
+    
+    args = vars(parse.parse_args())
+    
+    # === CONFIGURATION ===
+    GENERATOR = torch.Generator().manual_seed(42)
+    BATCH_SIZE = args['batch']
+    EPOCHS = args['epoch']
+    LEARNING_RATE = args['lr']
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    MODEL_SAVE_PATH = "transformer_model.pth"
+    SRC_PATH = './training/europarl-v7.de-en.en'
+    TGT_PATH = './training/europarl-v7.de-en.de'
+    LOG_INTERVAL = 100  
+    GRAD_CLIP = 1.0
+    SUBSET_SIZE = 0.1
+
+    # Load SentencePiece tokenizer
+    sp = preprocess.load_tokenizer()
+
+    # Load dataset
+    tr_loader, val_loader = loader.load_data(SRC_PATH,
+                                            TGT_PATH,
+                                            BATCH_SIZE,
+                                            generator=GENERATOR,
+                                            subset_size=SUBSET_SIZE)
+
+    dataloader = {'train': tr_loader, 'validation': val_loader} 
+    
+    model = Transformer(
+        num_layers=6, embed_size=512, num_heads=8,
+        dff=2048, vocab_size=32000, dropout=0.1).to(DEVICE)
+
+    
+    criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore padding token
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.98), eps=1e-9)
+
+    # Learning rate scheduler (Inverse Square Root Decay)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lambda step: min((step+1) ** -0.5, (step+1) * (4000 ** -1.5)))
+
+    
+    history = train(model, criterion, optimizer, scheduler, dataloader)
     plotter.plot_loss_bleu(history, figsize=(12, 6))
-    # PATH = './transformer_model2.pth'
-    # model.load_state_dict(torch.load(PATH, weights_only=True))
-    # model.eval()
-    # bleu = calculate_bleu_nltk(model, val_loader, tokenizer=sp)
-    # print(f"🌍 BLEU Score: {bleu * 100:.4f}")
